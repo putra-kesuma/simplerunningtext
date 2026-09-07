@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Real-Time MQTT P10</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Library Paho MQTT untuk WebSockets -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <style>
+        body { background-color: #2c3e50; padding-top: 40px; color: white; }
+        .card { box-shadow: 0 4px 12px rgba(0,0,0,0.3); border-radius: 12px; border: none; background-color: #34495e; color: white; }
+        .status-box { font-weight: bold; padding: 10px; border-radius: 8px; text-align: center; font-size: 0.9em; }
+        .online { background-color: #1e8449; color: white; }
+        .offline { background-color: #c0392b; color: white; }
+        .form-control, .form-select { background-color: #ecf0f1; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card p-4">
+                <h3 class="text-center mb-4">🚀 Panel P10 Real-Time (MQTT)</h3>
+                
+                <!-- Indikator Status -->
+                <div class="row mb-4">
+                    <div class="col-12 mb-2">
+                        <div id="statusDB" class="status-box offline">
+                            🗄️ DATABASE MYSQL: MENGHUBUNGKAN...
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div id="statusMQTT" class="status-box offline">
+                            🌐 BROKER: OFFLINE
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div id="statusAlat" class="status-box offline">
+                            🤖 ALAT P10: OFFLINE
+                        </div>
+                    </div>
+                </div>
+
+                <form id="formP10">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">📝 Teks Tampilan</label>
+                        <textarea class="form-control" id="inputTeks" rows="3" required></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">☀️ Kecerahan (Brightness)</label>
+                        <input type="range" class="form-range" id="inputBrightness" min="0" max="255" value="30">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">🏎️ Kecepatan Scroll</label>
+                        <input type="range" class="form-range" id="inputSpeed" min="5" max="100" value="40" dir="rtl">
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">📺 Mode Tampilan</label>
+                        <select class="form-select" id="inputMode">
+                            <option value="1">Berjalan Kiri (Scroll)</option>
+                            <option value="2">Diam di Tengah (Statis)</option>
+                        </select>
+                    </div>
+
+                    <button type="button" class="btn btn-warning w-100 fw-bold py-2" onclick="kirimData()">
+                        ⚡ KIRIM REAL-TIME
+                    </button>
+                    <div id="pesan" class="text-center mt-3 fw-bold text-warning"></div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ====================================================================
+// MATERI GURU IOT & WEB (File: index.html - Bagian Javascript)
+// Script ini menghubungkan antara Web, Server MQTT (Broker), dan MySQL.
+// Ini adalah konsep inti IoT: Kontrol Perangkat Jarak Jauh secara Real-Time.
+// ====================================================================
+
+// --- 1. KONFIGURASI MQTT (Materi IoT) ---
+// MQTT adalah protokol ringan untuk mengirim pesan ke perangkat IoT.
+const mqtt_broker = "broker.emqx.io"; // Menggunakan server broker MQTT gratis dan publik
+const mqtt_port = 8084; // Port 8084 (Secure WebSockets), web butuh WebSockets untuk terhubung ke MQTT
+const mqtt_topic = "sekolah/iot/p10/data"; // "Alamat" saluran tempat web dan alat berkomunikasi. Harus unik!
+const mqtt_topic_status = "sekolah/iot/p10/status"; // Topik khusus untuk mengecek alat online/offline
+const client_id = "web_guru_" + Math.random().toString(16).substr(2, 8); // Identitas acak agar tidak bentrok dengan alat lain
+
+// Membuat objek Client MQTT dari library Paho
+let mqttClient = new Paho.MQTT.Client(mqtt_broker, mqtt_port, client_id);
+
+// Menangani kondisi jika koneksi internet/broker terputus
+mqttClient.onConnectionLost = function(responseObject) {
+    document.getElementById('statusMQTT').className = "status-box offline";
+    document.getElementById('statusMQTT').innerHTML = "🌐 BROKER: OFFLINE";
+    // Jika broker putus, kita anggap alat juga tidak bisa dijangkau
+    document.getElementById('statusAlat').className = "status-box offline";
+    document.getElementById('statusAlat').innerHTML = "🤖 ALAT P10: OFFLINE";
+    
+    setTimeout(connectMQTT, 3000); // Coba konek lagi otomatis setelah 3 detik
+};
+
+// Menangani pesan yang datang dari Broker MQTT (Khususnya status alat)
+mqttClient.onMessageArrived = function(message) {
+    if (message.destinationName === mqtt_topic_status) {
+        if (message.payloadString === "online") {
+            document.getElementById('statusAlat').className = "status-box online";
+            document.getElementById('statusAlat').innerHTML = "🤖 ALAT P10: ONLINE";
+        } else if (message.payloadString === "offline") {
+            document.getElementById('statusAlat').className = "status-box offline";
+            document.getElementById('statusAlat').innerHTML = "🤖 ALAT P10: OFFLINE";
+        }
+    }
+};
+
+// Fungsi untuk menghubungkan web ke broker MQTT
+function connectMQTT() {
+    mqttClient.connect({
+        useSSL: true, // Wajib true (Secure) jika website nantinya di-hosting/online-kan (misal di cPanel)
+        onSuccess: function() {
+            // Jika berhasil konek, ubah warna indikator jadi Hijau
+            document.getElementById('statusMQTT').className = "status-box online";
+            document.getElementById('statusMQTT').innerHTML = "🌐 BROKER: ONLINE";
+            
+            // Subscribe ke topik status alat agar web tahu kalau alat nyala/mati
+            mqttClient.subscribe(mqtt_topic_status);
+        }
+    });
+}
+connectMQTT(); // Menjalankan fungsi koneksi MQTT pertama kali saat web dibuka
+
+// --- 1.B. FUNGSI CEK STATUS DATABASE ---
+function cekDatabase() {
+    fetch('api_status_db.php')
+    .then(response => response.json())
+    .then(data => {
+        if(data.status === "online") {
+            document.getElementById('statusDB').className = "status-box online";
+            document.getElementById('statusDB').innerHTML = "🗄️ DATABASE MYSQL: TERHUBUNG";
+        } else {
+            document.getElementById('statusDB').className = "status-box offline";
+            document.getElementById('statusDB').innerHTML = "🗄️ DATABASE MYSQL: TERPUTUS";
+        }
+    }).catch(error => {
+        // Jika masuk ke catch, biasanya karena hosting memblokir request, 
+        // file tidak ditemukan (404), atau koneksi.php menghasilkan pesan error non-JSON.
+        document.getElementById('statusDB').className = "status-box offline";
+        document.getElementById('statusDB').innerHTML = "🗄️ DATABASE MYSQL: TERPUTUS / CEK KONEKSI";
+    });
+}
+cekDatabase(); // Cek saat pertama buka
+setInterval(cekDatabase, 10000); // Cek ulang otomatis setiap 10 detik
+
+// --- 2. AMBIL DATA TERAKHIR DARI DATABASE MYSQL (Materi Web & Database) ---
+// Ketika web dibuka, ambil nilai terakhir yang disimpan di MySQL agar form tidak kosong.
+fetch('api_baca.php') // Memanggil API kita
+.then(response => response.json()) // Mengubah respon dari PHP ke dalam format objek Javascript (JSON)
+.then(data => {
+    // Memasukkan nilai dari database ke dalam form
+    document.getElementById('inputTeks').value = data.teks;
+    document.getElementById('inputBrightness').value = data.brightness;
+    document.getElementById('inputSpeed').value = data.speed;
+    document.getElementById('inputMode').value = data.mode;
+});
+
+// --- 3. FUNGSI KIRIM DATA (Gabungan IoT, Web, & Database) ---
+// Fungsi ini dijalankan ketika tombol "KIRIM REAL-TIME" ditekan
+function kirimData() {
+    // Kumpulkan nilai dari inputan form menjadi objek Javascript (Payload)
+    let payloadObj = {
+        teks: document.getElementById('inputTeks').value,
+        brightness: parseInt(document.getElementById('inputBrightness').value),
+        speed: parseInt(document.getElementById('inputSpeed').value),
+        mode: parseInt(document.getElementById('inputMode').value)
+    };
+    
+    // A. Dorong data ke alat via MQTT secara Real-Time (Tanpa Reload Halaman/Delay) - MATERI IOT
+    if (mqttClient.isConnected()) {
+        let pesanJSON = JSON.stringify(payloadObj); // Ubah objek jadi string JSON (Alat IoT biasanya baca format ini)
+        let message = new Paho.MQTT.Message(pesanJSON);
+        message.destinationName = mqtt_topic;
+        message.retained = true; // Fitur Retain: Simpan pesan terakhir di server broker, agar alat yang baru nyala (restart) bisa langsung mendownload settingan terakhir ini.
+        mqttClient.send(message); // Kirim pesan!
+        document.getElementById('pesan').innerHTML = "Berhasil dikirim ke Panel P10 secara Real-Time!";
+    } else {
+        document.getElementById('pesan').innerHTML = "Gagal: MQTT Belum Terhubung!";
+    }
+
+    // B. Simpan Salinannya ke Database MySQL (Untuk tugas Guru Database & Web)
+    // Walaupun MQTT tidak butuh MySQL untuk jalan, MySQL dipakai untuk menyimpan "History/Setting Terakhir" di sisi server Web lokal.
+    let formData = new FormData();
+    formData.append('teks', payloadObj.teks);
+    formData.append('brightness', payloadObj.brightness);
+    formData.append('speed', payloadObj.speed);
+    formData.append('mode', payloadObj.mode);
+    
+    // Kirim data ke API (api_simpan.php) secara diam-diam di background (Teknik AJAX/Fetch API)
+    fetch('api_simpan.php', { method: 'POST', body: formData });
+    
+    // Hilangkan pesan notifikasi setelah 3 detik
+    setTimeout(() => document.getElementById('pesan').innerHTML = "", 3000);
+}
+</script>
+
+</body>
+</html>
