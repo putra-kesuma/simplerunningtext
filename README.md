@@ -6,6 +6,20 @@ Dokumen ini adalah panduan pembagian tugas untuk Guru/Siswa agar proses pembelaj
 
 ---
 
+## 🔄 ALUR KERJA SISTEM (BAGAIMANA SISTEM INI BEKERJA?)
+
+Untuk memudahkan pemahaman, berikut adalah alur bagaimana 3 teknologi (Web, Database, dan Hardware IoT) saling berkomunikasi:
+
+1. **User Input (Web - `index.html`)**: Pengguna (Guru/Siswa) membuka halaman web dan memasukkan teks, mengatur kecerahan, kecepatan, dan mode tampilan, lalu menekan tombol **"Kirim Real-Time"**.
+2. **Proses Pengiriman Ganda (Secara Bersamaan)**:
+   - **Jalur Cepat (IoT/MQTT)**: Javascript di web mengirimkan data (dalam format JSON) *secara langsung* ke Broker MQTT publik (`broker.emqx.io`). Karena menggunakan WebSockets dan MQTT, data ini melesat dalam hitungan milidetik. Panel P10 yang sudah terkoneksi internet dan memantau (subscribe) saluran/topik yang sama akan langsung menerima data ini dan mengubah tampilannya detik itu juga.
+   - **Jalur Penyimpanan (Web/Database - PHP & MySQL)**: Pada saat yang sama, web secara diam-diam (menggunakan AJAX/Fetch API) mengirimkan salinan data tersebut ke file `api_simpan.php`. File PHP ini kemudian bertugas menyimpannya secara permanen ke dalam tabel database MySQL (`db_iot.sql`).
+3. **Fungsi Penyimpanan (Agar Data Tidak Hilang)**:
+   - **Bagi Web**: Saat halaman web di-refresh atau dibuka kembali, web akan memanggil `api_baca.php` untuk mengambil data terakhir dari database MySQL, sehingga form input tidak kembali kosong/reset.
+   - **Bagi Alat P10**: Pesan MQTT dikirim dengan fitur *Retain*, artinya server MQTT akan menyimpan pesan terakhir. Jika panel P10 dimatikan dan dinyalakan lagi besok harinya, ia akan otomatis mengunduh tampilan terakhir tanpa perlu menunggu pengguna menekan tombol "Kirim" lagi di web.
+
+---
+
 ## 1. 🗄️ TUGAS GURU/SISWA DATABASE
 **Fokus Utama:** Merancang, mengonfigurasi, dan memastikan data dapat disimpan dengan baik di dalam server (MySQL).
 
